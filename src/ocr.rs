@@ -1,4 +1,4 @@
-use std::{fmt::format, fs::remove_file, io};
+use std::{fs::remove_file, io};
 
 use rust_ocr::Coordinates;
 use xcap::{Window, XCapError, XCapResult};
