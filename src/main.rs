@@ -1,1 +1,3 @@
+mod ocr;
+
 fn main() {}
