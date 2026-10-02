@@ -8,5 +8,10 @@ license = "MIT"
 
 [dependencies]
 egui_overlay = "0.9.0"
-rust_ocr = "0.1.5"
+egui = "0.29.0"
 xcap = "0.9.8"
+arc-swap = "1.9.2"
+
+ocrs = "0.13.1"
+rten = "0.26.0"
+anyhow = "1.0.104"

@@ -1,86 +1,94 @@
-use std::{fs::remove_file, io};
+use std::{cmp::Ordering, process::Command};
 
-use rust_ocr::Coordinates;
-use xcap::{Window, XCapError, XCapResult};
+use ocrs::{OcrEngine, OcrEngineParams, TextLine};
+use rten::Model;
+use xcap::{Window, XCapError, XCapResult, image::DynamicImage};
 
 const TEMP_TITLE: &str = "tmp_capture.png";
+pub const EXPLORER: &str = "Windows Explorer";
 
-pub fn focused_window() -> XCapResult<Window> {
-    let windows = Window::all()?;
-    for win in windows {
-        if win.is_focused()? {
-            return Ok(win);
-        }
-    }
+pub fn focused_window_index(windows: &Vec<Window>) -> XCapResult<usize> {
+    let win = windows
+        .iter()
+        .enumerate()
+        .filter(|(_, win)| win.app_name().is_ok_and(|s| &s != EXPLORER))
+        .max_by(|(_, win), (_, win2)| {
+            if win.is_focused().is_ok_and(|b| b) {
+                Ordering::Greater
+            } else {
+                win.z()
+                    .unwrap_or_default()
+                    .cmp(&win2.z().unwrap_or_default())
+            }
+        });
 
-    Err(XCapError::Error(String::from("Focused window not found")))
+    win.map(|(i, _)| i)
+        .ok_or(XCapError::Error(String::from("Focused window not found")))
 }
 
-pub fn save_capture(window: &Window) -> Result<(), Error> {
-    let img = window
-        .capture_image()
-        .map_err(|e| Error::Text(format!("Err: {e}")))?;
-    img.save(TEMP_TITLE)
-        .map_err(|e| Error::Text(format!("Err: {e}")))?;
-
-    Ok(())
-}
-
-pub fn parse() -> Result<Vec<Coordinates>, String> {
-    rust_ocr::ocr_with_bounds(TEMP_TITLE, None).map_err(|e| format!("ocr err{e}"))
-}
-
-pub struct Stated {
+pub struct RecEngine {
     target: Window,
-    is_old: bool,
-    pub text: Vec<Coordinates>,
+    engine: OcrEngine,
 }
 
-impl Stated {
-    pub fn new(window: Window) -> Stated {
-        Self {
+impl RecEngine {
+    const URL_RECOGNITION_MODEL: &str =
+        "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.onnx";
+    const URL_DETECTION_MODEL: &str =
+        "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.onnx";
+
+    const RECOGNITION_MODEL: &str = "models/text-recognition.onnx";
+    const DETECTION_MODEL: &str = "models/text-detection.onnx";
+
+    pub fn new(window: Window) -> anyhow::Result<Self> {
+        let detection_model = Model::load_file("models/text-detection.onnx")?;
+        let recognition_model = Model::load_file("models/text-recognition.onnx")?;
+
+        let engine = OcrEngine::new(OcrEngineParams {
+            detection_model: Some(detection_model),
+            recognition_model: Some(recognition_model),
+            ..Default::default()
+        })?;
+
+        Ok(Self {
             target: window,
-            is_old: false,
-            text: vec![],
+            engine,
+        })
+    }
+
+    pub fn process(&self) -> anyhow::Result<Vec<TextLine>> {
+        let capture = DynamicImage::ImageRgba8(self.target.capture_image()?).to_rgb8();
+        let img_source = ocrs::ImageSource::from_bytes(capture.as_raw(), capture.dimensions())?;
+
+        let ocr_input = self.engine.prepare_input(img_source)?;
+        let word_rects = self.engine.detect_words(&ocr_input)?;
+        let line_rects = self.engine.find_text_lines(&ocr_input, &word_rects);
+        let line_texts = self.engine.recognize_text(&ocr_input, &line_rects)?;
+
+        Ok(line_texts.into_iter().flatten().collect())
+    }
+}
+
+pub fn download_models() {
+    use std::fs::exists;
+    let _ = std::fs::create_dir("models");
+
+    fn dnld(url: &str, path: &str, msg: &str) {
+        if !exists(path).is_ok_and(|b| b) {
+            println!("{msg}");
+            let _ = Command::new("curl").args([url, "-o", path]).spawn();
         }
     }
 
-    pub fn delete_temp(&mut self) -> Result<(), Error> {
-        remove_file(TEMP_TITLE).map_err(|e| Error::Io(e))
-    }
+    dnld(
+        RecEngine::URL_DETECTION_MODEL,
+        RecEngine::DETECTION_MODEL,
+        "Download detection model...",
+    );
 
-    pub fn save_capture(&mut self) -> Result<(), Error> {
-        save_capture(&self.target)?;
-
-        self.is_old = false;
-        Ok(())
-    }
-
-    pub fn parse(&mut self) -> Result<(), Error> {
-        if self.is_old {
-            return Err(Error::Old);
-        }
-
-        self.text = parse()?;
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    Old,
-    Io(io::Error),
-    Text(String),
-}
-
-impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<String> for Error {
-    fn from(value: String) -> Self {
-        Self::Text(value)
-    }
+    dnld(
+        RecEngine::URL_RECOGNITION_MODEL,
+        RecEngine::RECOGNITION_MODEL,
+        "Download detection model...",
+    );
 }
