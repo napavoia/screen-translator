@@ -5,7 +5,7 @@ use xcap::{Window, XCapError, XCapResult};
 
 const TEMP_TITLE: &str = "tmp_capture.png";
 
-fn focused_window() -> XCapResult<Window> {
+pub fn focused_window() -> XCapResult<Window> {
     let windows = Window::all()?;
     for win in windows {
         if win.is_focused()? {
