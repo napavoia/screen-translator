@@ -7,5 +7,6 @@ authors = ["napavoia"]
 license = "MIT"
 
 [dependencies]
+egui_overlay = "0.9.0"
 rust_ocr = "0.1.5"
 xcap = "0.9.8"
