@@ -6,6 +6,9 @@ description = "A translator over the window"
 authors = ["napavoia"]
 license = "MIT"
 
+[profile.dev]
+opt-level = 3
+
 [dependencies]
 egui_overlay = "0.9.0"
 egui = "0.29.0"
