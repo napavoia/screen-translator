@@ -75,7 +75,7 @@ impl Stated {
     }
 }
 
-enum Error {
+pub enum Error {
     Old,
     Io(io::Error),
     Text(String),
