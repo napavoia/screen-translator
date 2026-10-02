@@ -1,0 +1,9 @@
+[package]
+name = "screen-translator"
+version = "0.0.1"
+edition = "2024"
+description = "A translator over the window"
+authors = ["napavoia"]
+license = "MIT"
+
+[dependencies]
