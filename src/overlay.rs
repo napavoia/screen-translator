@@ -112,11 +112,11 @@ impl Overlay {
             ui.separator();
             ui.horizontal(|ui| {
                 egui::ComboBox::from_label("")
-                    .selected_text(format!("{}", title(self.window())))
+                    .selected_text(title(self.window()))
                     .show_ui(ui, |ui| {
                         let windows = self.windows();
                         for (i, win) in windows.iter().enumerate() {
-                            let text = format!("{}", title(&win));
+                            let text = title(win);
                             if ui.selectable_value(&mut self.current, i, text).changed() {
                                 self.windows = windows;
                                 self.refresh_thread();
@@ -158,7 +158,7 @@ impl Overlay {
             .unwrap_or_default()
             .into_iter()
             .filter(|w| {
-                w.app_name().is_ok_and(|v| &v != EXPLORER) && w.is_minimized().is_ok_and(|b| !b)
+                w.app_name().is_ok_and(|v| v != EXPLORER) && w.is_minimized().is_ok_and(|b| !b)
             })
             .collect()
     }

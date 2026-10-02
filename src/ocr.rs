@@ -12,11 +12,11 @@ pub const EXPLORER: &str = "Windows Explorer";
 
 pub static mut ELAPSED: Duration = Duration::from_secs(0);
 
-pub fn focused_window_index(windows: &Vec<Window>) -> XCapResult<usize> {
+pub fn focused_window_index(windows: &[Window]) -> XCapResult<usize> {
     let win = windows
         .iter()
         .enumerate()
-        .filter(|(_, win)| win.app_name().is_ok_and(|s| &s != EXPLORER))
+        .filter(|(_, win)| win.app_name().is_ok_and(|s| s != EXPLORER))
         .max_by(|(_, win), (_, win2)| {
             if win.is_focused().is_ok_and(|b| b) {
                 Ordering::Greater
