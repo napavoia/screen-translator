@@ -7,3 +7,5 @@ authors = ["napavoia"]
 license = "MIT"
 
 [dependencies]
+rust_ocr = "0.1.5"
+xcap = "0.9.8"
