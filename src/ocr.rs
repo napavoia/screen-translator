@@ -66,6 +66,7 @@ impl Stated {
     }
 }
 
+#[derive(Debug)]
 pub enum Error {
     Old,
     Io(io::Error),
