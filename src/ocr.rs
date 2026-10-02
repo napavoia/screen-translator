@@ -1,11 +1,16 @@
-use std::{cmp::Ordering, process::Command};
+use std::{
+    cmp::Ordering,
+    process::Command,
+    time::{Duration, Instant},
+};
 
 use ocrs::{OcrEngine, OcrEngineParams, TextLine};
 use rten::Model;
 use xcap::{Window, XCapError, XCapResult, image::DynamicImage};
 
-const TEMP_TITLE: &str = "tmp_capture.png";
 pub const EXPLORER: &str = "Windows Explorer";
+
+pub static mut ELAPSED: Duration = Duration::from_secs(0);
 
 pub fn focused_window_index(windows: &Vec<Window>) -> XCapResult<usize> {
     let win = windows
@@ -57,6 +62,7 @@ impl RecEngine {
     }
 
     pub fn process(&self) -> anyhow::Result<Vec<TextLine>> {
+        let now = Instant::now();
         let capture = DynamicImage::ImageRgba8(self.target.capture_image()?).to_rgb8();
         let img_source = ocrs::ImageSource::from_bytes(capture.as_raw(), capture.dimensions())?;
 
@@ -64,6 +70,10 @@ impl RecEngine {
         let word_rects = self.engine.detect_words(&ocr_input)?;
         let line_rects = self.engine.find_text_lines(&ocr_input, &word_rects);
         let line_texts = self.engine.recognize_text(&ocr_input, &line_rects)?;
+
+        unsafe {
+            ELAPSED = now.elapsed();
+        }
 
         Ok(line_texts.into_iter().flatten().collect())
     }
