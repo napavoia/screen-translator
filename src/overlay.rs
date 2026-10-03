@@ -1,14 +1,14 @@
 use std::{process::exit, sync::Arc, thread::JoinHandle};
 
-use arc_swap::ArcSwap;
 use egui::{Color32, Id, Rect, Stroke, pos2};
 use egui_overlay::{
     EguiOverlay, egui_render_three_d::ThreeDBackend, egui_window_glfw_passthrough::GlfwBackend,
 };
-use ocrs::{TextItem, TextLine};
+use ocrs::TextItem;
 use xcap::Window;
 
 use crate::{
+    ArcBuffer,
     ocr::{ELAPSED, EXPLORER, focused_window_index},
     thread,
 };
@@ -17,7 +17,7 @@ const TITLE: &str = "Screen Translator";
 
 pub struct Overlay {
     thread: JoinHandle<()>,
-    texts: Arc<ArcSwap<Vec<TextLine>>>,
+    texts: ArcBuffer,
     settings: bool,
     borders: bool,
     debug_mode: bool,
@@ -62,11 +62,10 @@ impl EguiOverlay for Overlay {
 
 impl Overlay {
     pub fn new() -> Self {
-        let texts = Arc::new(ArcSwap::default());
+        let texts: ArcBuffer = Arc::default();
         let cloned = texts.clone();
         let windows = Window::all().unwrap_or_default();
         let current = focused_window_index(&windows).unwrap();
-        //let window = WrapWindow(windows[index].clone());
 
         Self {
             texts,

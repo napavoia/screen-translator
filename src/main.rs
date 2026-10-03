@@ -16,13 +16,14 @@ mod ocr;
 mod overlay;
 
 const DELAY: Duration = Duration::from_millis(100);
+pub type ArcBuffer = Arc<ArcSwapAny<Arc<Vec<TextLine>>>>;
 
 fn main() {
     download_models();
     egui_overlay::start(Overlay::new());
 }
 
-fn thread(window: Window, buffer: Arc<ArcSwapAny<Arc<Vec<TextLine>>>>) -> JoinHandle<()> {
+fn thread(window: Window, buffer: ArcBuffer) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut now = Instant::now();
         let engine = RecEngine::new(window).expect("new err");
