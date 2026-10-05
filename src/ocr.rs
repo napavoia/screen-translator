@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    process::Command,
+    process::{Command, exit},
     time::{Duration, Instant},
 };
 
@@ -84,9 +84,16 @@ pub fn download_models() {
     let _ = std::fs::create_dir("models");
 
     fn dnld(url: &str, path: &str, msg: &str) {
-        if !exists(path).is_ok_and(|b| b) {
-            println!("{msg}");
-            let _ = Command::new("curl").args([url, "-o", path]).spawn();
+        match exists(path) {
+            Ok(false) => {
+                println!("[OK] {msg}");
+                let _ = Command::new("curl").args([url, "-o", path]).spawn();
+            }
+            Ok(true) => {}
+            Err(err) => {
+                println!("[ERR] download error; {err}");
+                exit(1)
+            }
         }
     }
 
