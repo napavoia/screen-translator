@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use egui::{Color32, Id, Key, Modifiers, Rect, Stroke};
+use egui::{Color32, Id, Key, Modifiers, Rect, RichText, Rounding, Stroke, WidgetText};
 use egui_overlay::{
     EguiOverlay, egui_render_three_d::ThreeDBackend, egui_window_glfw_passthrough::GlfwBackend,
 };
@@ -13,7 +13,7 @@ use ocrs::{TextItem, TextLine};
 use xcap::Window;
 
 use crate::{
-    ArcBuffer,
+    ArcBuffer, ENABLE, handle_error,
     ocr::{ELAPSED, EXPLORER, focused_window_index},
     thread,
 };
@@ -33,10 +33,10 @@ pub struct Overlay {
 
 impl EguiOverlay for Overlay {
     fn gui_run(&mut self, egui: &egui::Context, _: &mut ThreeDBackend, glfw: &mut GlfwBackend) {
-        let w = self.window().width().unwrap();
-        let h = self.window().height().unwrap();
-        let x = self.window().x().unwrap();
-        let y = self.window().y().unwrap();
+        let w = handle_error!(self.window().width());
+        let h = handle_error!(self.window().height());
+        let x = handle_error!(self.window().x());
+        let y = handle_error!(self.window().y());
 
         glfw.set_window_size([w as f32, h as f32]);
         glfw.window.set_pos(x, y);
@@ -54,13 +54,7 @@ impl EguiOverlay for Overlay {
             .default_size([w as f32, h as f32])
             .order(egui::Order::Background)
             .show(egui, |ui| {
-                if self.enable_ocr {
-                    self.draw_text(ui);
-                }
-
-                if self.borders {
-                    self.draw_borders(ui)
-                }
+                self.draw_text(ui);
             });
 
         self.hotkeys(egui);
@@ -79,8 +73,8 @@ impl Overlay {
     pub fn new() -> Self {
         let texts: ArcBuffer = Arc::default();
         let cloned = texts.clone();
-        let windows = Window::all().unwrap_or_default();
-        let current = focused_window_index(&windows).unwrap();
+        let windows = handle_error!(Window::all() ;; vec![]);
+        let current = handle_error!(focused_window_index(&windows));
 
         Self {
             // TEXT
@@ -89,8 +83,8 @@ impl Overlay {
             // FLAGS
             settings: true,
             borders: false,
-            debug_mode: false,
-            enable_ocr: true,
+            debug_mode: cfg!(debug_assertions),
+            enable_ocr: unsafe { ENABLE },
             // WINDOWS
             windows,
             current,
@@ -99,14 +93,20 @@ impl Overlay {
 
     fn draw_text(&mut self, ui: &mut egui::Ui) {
         for val in self.text.text() {
-            ui.put(val.rect, egui::Label::new(&val.text).selectable(false));
-        }
-    }
+            let stroke = match self.borders {
+                true => Stroke::new(0.8, Color32::GREEN),
+                false => Stroke::NONE,
+            };
+            let background = Color32::from_rgba_premultiplied(48, 48, 48, 220);
+            let text = RichText::new(&val.text).color(Color32::from_rgb(255, 255, 255));
 
-    fn draw_borders(&mut self, ui: &mut egui::Ui) {
-        for val in self.text.text() {
             ui.painter()
-                .rect_stroke(val.rect, 0.0, Stroke::new(0.8, Color32::GREEN));
+                .rect(val.rect, Rounding::same(10.0), background, stroke);
+
+            ui.put(
+                val.rect,
+                egui::Label::new(WidgetText::RichText(text)).selectable(false),
+            );
         }
     }
 
@@ -119,23 +119,43 @@ impl Overlay {
         }
 
         fn hotkeys(egui: &egui::Context) -> Hotkey {
-            egui.input_mut(|i| {
-                if i.consume_key(Modifiers::ALT, Key::C) {
-                    Hotkey::SwithWindow
-                } else if i.consume_key(Modifiers::ALT, Key::I) {
-                    Hotkey::ToggleSetting
-                } else if i.consume_key(
-                    Modifiers {
+            struct Container {
+                modifier: Modifiers,
+                key: Key,
+                result: Hotkey,
+            }
+            const HOTKEYS: [Container; 3] = [
+                Container {
+                    modifier: Modifiers::ALT,
+                    key: Key::C,
+                    result: Hotkey::SwithWindow,
+                },
+                Container {
+                    modifier: Modifiers::ALT,
+                    key: Key::T,
+                    result: Hotkey::ToggleSetting,
+                },
+                Container {
+                    modifier: Modifiers {
                         alt: true,
                         ctrl: true,
-                        ..Default::default()
+                        shift: false,
+                        mac_cmd: false,
+                        command: false,
                     },
-                    Key::I,
-                ) {
-                    Hotkey::Close
-                } else {
-                    Hotkey::None
+                    key: Key::I,
+                    result: Hotkey::Close,
+                },
+            ];
+
+            egui.input_mut(|i| {
+                for el in HOTKEYS {
+                    if i.consume_key(el.modifier, el.key) {
+                        return el.result;
+                    }
                 }
+
+                Hotkey::None
             })
         }
 
@@ -168,8 +188,9 @@ impl Overlay {
                 glfw.window.set_decorated(borders);
             }
 
-            ui.checkbox(&mut self.enable_ocr, "Translate");
-            ui.checkbox(&mut self.borders, "Text Borders");
+            if ui.checkbox(&mut self.enable_ocr, "Translate").changed() {
+                unsafe { ENABLE = self.enable_ocr }
+            };
             ui.checkbox(&mut self.debug_mode, "Debug Mode");
 
             ui.separator();
@@ -200,6 +221,7 @@ impl Overlay {
     }
 
     fn debug(&mut self, ui: &mut egui::Ui, glfw: &mut GlfwBackend) {
+        ui.checkbox(&mut self.borders, "Text Borders");
         ui.label(format!("Count Text Bounds: {}", self.text.text().len()));
         ui.label(format!("Elapsed time on recognize text: {:?}", unsafe {
             ELAPSED
@@ -221,8 +243,7 @@ impl Overlay {
     }
 
     fn windows(&mut self) -> Vec<Window> {
-        Window::all()
-            .unwrap_or_default()
+        handle_error!(Window::all() ;; vec![])
             .into_iter()
             .filter(|w| {
                 w.app_name().is_ok_and(|v| v != EXPLORER) && w.is_minimized().is_ok_and(|b| !b)
@@ -240,7 +261,7 @@ impl Overlay {
 }
 
 fn title(win: &Window) -> String {
-    win.app_name().unwrap_or(String::from("?"))
+    handle_error!(win.app_name() ;; String::from("?"))
 }
 
 struct TextPipeline {
