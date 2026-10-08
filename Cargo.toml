@@ -1,6 +1,6 @@
 [package]
 name = "screen-translator"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 description = "A translator over the window"
 authors = ["napavoia"]
@@ -12,6 +12,7 @@ opt-level = 3
 [dependencies]
 egui_overlay = "0.9.0"
 egui = "0.29.0"
+egui_extras = "0.29.1"
 xcap = "0.9.8"
 arc-swap = "1.9.2"
 
@@ -19,3 +20,8 @@ ocrs = "0.13.1"
 rten = "0.26.0"
 anyhow = "1.0.104"
 gag = "1.0.0"
+# blake3 = {version="1.8.7", features = ["serde"]}
+#
+# reqwest = { version = "0.13.5", features = ["blocking", "json"] }
+# serde = { version = "1.0", features = ["derive"] }
+# serde_json = "1.0"
