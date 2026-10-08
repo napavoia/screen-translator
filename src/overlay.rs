@@ -1,9 +1,4 @@
-use std::{
-    process::exit,
-    sync::Arc,
-    thread::JoinHandle,
-    time::{Duration, Instant},
-};
+use std::process::exit;
 
 use egui::{Color32, Id, Key, Modifiers, Rect, RichText, Rounding, Stroke, WidgetText};
 use egui_overlay::{
@@ -13,20 +8,20 @@ use ocrs::{TextItem, TextLine};
 use xcap::Window;
 
 use crate::{
-    ArcBuffer, ENABLE, handle_error,
-    ocr::{ELAPSED, EXPLORER, focused_window_index},
-    thread,
+    handle_error,
+    ocr::{EXPLORER, RectangleEngine, Task, focused_window_index},
+    profiler,
+    profiler::Profiler,
 };
 
 const TITLE: &str = "Screen Translator";
 
 pub struct Overlay {
-    thread: JoinHandle<()>,
+    engine: RectangleEngine,
     text: TextPipeline,
     settings: bool,
     borders: bool,
     debug_mode: bool,
-    enable_ocr: bool,
     current: usize,
     windows: Vec<Window>,
 }
@@ -46,7 +41,17 @@ impl EguiOverlay for Overlay {
             self.settings(egui, glfw);
         }
 
-        self.text.process();
+        if self.debug_mode {
+            self.debug(egui, glfw);
+        }
+
+        self.engine.process();
+
+        match self.engine.texts() {
+            Ok(v) => self.text.process(v),
+            Err(_) => {}
+        }
+
         egui::Area::new(Id::new("Text Area"))
             .interactable(false)
             .movable(false)
@@ -70,24 +75,18 @@ impl EguiOverlay for Overlay {
 }
 
 impl Overlay {
-    pub fn new() -> Self {
-        let texts: ArcBuffer = Arc::default();
-        let cloned = texts.clone();
-        let windows = handle_error!(Window::all() ;; vec![]);
-        let current = handle_error!(focused_window_index(&windows));
-
+    pub fn new(engine: RectangleEngine, win: (Vec<Window>, usize)) -> Self {
         Self {
             // TEXT
-            thread: thread(windows[current].clone(), cloned),
-            text: TextPipeline::new(texts),
+            engine: engine,
+            text: TextPipeline::new(),
             // FLAGS
             settings: true,
             borders: false,
             debug_mode: cfg!(debug_assertions),
-            enable_ocr: unsafe { ENABLE },
             // WINDOWS
-            windows,
-            current,
+            windows: win.0,
+            current: win.1,
         }
     }
 
@@ -167,8 +166,10 @@ impl Overlay {
                 if self.current == index {
                     return;
                 }
+                self.windows = windows;
                 self.current = index;
-                self.refresh_thread();
+                self.engine
+                    .send_task(Task::SwapWindow(self.window().clone()));
             }
             Hotkey::ToggleSetting => self.settings = !self.settings,
             Hotkey::Close => exit(0),
@@ -179,17 +180,17 @@ impl Overlay {
         egui::Window::new("Settings").show(egui, |ui| {
             ui.set_width(300.0);
 
-            if self.debug_mode {
-                self.debug(ui, glfw);
-            }
-
             let mut borders = glfw.window.is_decorated();
             if ui.checkbox(&mut borders, "Window Borders").changed() {
                 glfw.window.set_decorated(borders);
             }
 
-            if ui.checkbox(&mut self.enable_ocr, "Translate").changed() {
-                unsafe { ENABLE = self.enable_ocr }
+            let mut running = self
+                .engine
+                .running
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if ui.checkbox(&mut running, "Translate").changed() {
+                self.engine.send_task(Task::Toggle(running));
             };
             ui.checkbox(&mut self.debug_mode, "Debug Mode");
 
@@ -203,7 +204,8 @@ impl Overlay {
                             let text = title(win);
                             if ui.selectable_value(&mut self.current, i, text).changed() {
                                 self.windows = windows;
-                                self.refresh_thread();
+                                self.engine
+                                    .send_task(Task::SwapWindow(self.window().clone()));
                                 break;
                             };
                         }
@@ -220,26 +222,21 @@ impl Overlay {
         });
     }
 
-    fn debug(&mut self, ui: &mut egui::Ui, glfw: &mut GlfwBackend) {
-        ui.checkbox(&mut self.borders, "Text Borders");
-        ui.label(format!("Count Text Bounds: {}", self.text.text().len()));
-        ui.label(format!("Elapsed time on recognize text: {:?}", unsafe {
-            ELAPSED
-        }));
-        ui.label(format!(
-            "Elapsed time on merge text: {:?}",
-            self.text.elapsed
-        ));
+    fn debug(&mut self, egui: &egui::Context, glfw: &mut GlfwBackend) {
+        egui::Window::new("Debug").show(egui, |ui| {
+            ui.checkbox(&mut self.borders, "Text Borders");
+            ui.label(format!("Count Text Bounds: {}", self.text.text().len()));
+            let size = &glfw.window_size_logical;
+            ui.label(format!(
+                "Window Info: {} ({}x{})",
+                title(self.window()),
+                size[0],
+                size[1]
+            ));
+            ui.separator();
 
-        let size = &glfw.window_size_logical;
-        ui.label(format!(
-            "Window Info: {} ({}x{})",
-            title(self.window()),
-            size[0],
-            size[1]
-        ));
-
-        ui.separator();
+            Profiler::global().lock().draw(ui);
+        });
     }
 
     fn windows(&mut self) -> Vec<Window> {
@@ -254,10 +251,6 @@ impl Overlay {
     fn window(&self) -> &Window {
         &self.windows[self.current]
     }
-
-    fn refresh_thread(&mut self) {
-        self.thread = thread(self.window().clone(), self.text.inner.clone());
-    }
 }
 
 fn title(win: &Window) -> String {
@@ -265,21 +258,17 @@ fn title(win: &Window) -> String {
 }
 
 struct TextPipeline {
-    inner: ArcBuffer,
     inner_flag: usize,
     text: Vec<Text>,
-    elapsed: Duration,
 }
 
 impl TextPipeline {
     const Y_THRESHOLD: i32 = 10;
 
-    pub fn new(buff: ArcBuffer) -> Self {
+    pub fn new() -> Self {
         Self {
-            inner: buff,
             inner_flag: 0,
             text: vec![],
-            elapsed: Duration::from_secs(0),
         }
     }
 
@@ -287,17 +276,16 @@ impl TextPipeline {
         &self.text
     }
 
-    pub fn process(&mut self) {
-        let inner = self.inner.load();
-        if inner.len() == self.inner_flag {
+    pub fn process(&mut self, texts: &Vec<TextLine>) {
+        //let inner = self.inner.load();
+        if texts.len() == self.inner_flag {
             return;
         }
 
-        let now = Instant::now();
-
         self.text.clear();
 
-        for line in inner.iter() {
+        let _record = profiler!("pipeline_process");
+        for line in texts.iter() {
             let text = line.to_string();
             let rect = line.bounding_rect();
 
@@ -329,8 +317,7 @@ impl TextPipeline {
             self.text.push(Text::from(line));
         }
 
-        self.elapsed = now.elapsed();
-        self.inner_flag = inner.len();
+        self.inner_flag = texts.len();
     }
 }
 
